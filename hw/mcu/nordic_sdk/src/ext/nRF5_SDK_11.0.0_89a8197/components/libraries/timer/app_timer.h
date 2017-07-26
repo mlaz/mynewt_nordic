@@ -18,9 +18,9 @@
  *
  * @brief Application timer functionality.
  *
- * @details This module enables the application to create multiple timer instances based on the RTC1
+ * @details This module enables the application to create multiple timer instances based on the RTC2
  *          peripheral. Checking for time-outs and invokation of user time-out handlers is performed
- *          in the RTC1 interrupt handler. List handling is done using a software interrupt (SWI0).
+ *          in the RTC2 interrupt handler. List handling is done using a software interrupt (SWI0).
  *          Both interrupt handlers are running in APP_LOW priority level.
  *
  * @details When calling app_timer_start() or app_timer_stop(), the timer operation is just queued,
@@ -46,10 +46,6 @@
 #include "app_error.h"
 #include "app_util.h"
 #include "compiler_abstraction.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #define APP_TIMER_CLOCK_FREQ         32768                      /**< Clock frequency of the RTC timer used to implement the app timer module. */
 #define APP_TIMER_MIN_TIMEOUT_TICKS  5                          /**< Minimum value of the timeout_ticks parameter of app_timer_start(). */
@@ -89,7 +85,7 @@ extern "C" {
  *         ticks value that is not supported by this module.
  *
  * @param[in]  MS          Milliseconds.
- * @param[in]  PRESCALER   Value of the RTC1 PRESCALER register (must be the same value that was
+ * @param[in]  PRESCALER   Value of the RTC2 PRESCALER register (must be the same value that was
  *                         passed to APP_TIMER_INIT()). 
  *
  * @return     Number of timer ticks.
@@ -140,7 +136,7 @@ typedef enum
  *          SoftDevice init. 
  *
  *
- * @param[in]  PRESCALER        Value of the RTC1 PRESCALER register. This will decide the
+ * @param[in]  PRESCALER        Value of the RTC2 PRESCALER register. This will decide the
  *                              timer tick rate. Set to 0 for no prescaling.
  * @param[in]  OP_QUEUES_SIZE   Size of queues holding timer operations that are pending execution.
  * @param[in]  SCHEDULER_FUNC   Pointer to scheduler event handler
@@ -169,7 +165,7 @@ typedef enum
  *       allocate the buffers needed by the timer module (including aligning the buffers correctly)
  *       and take care of connecting the timer module to the scheduler (if specified).
  *
- * @param[in]  prescaler           Value of the RTC1 PRESCALER register. Set to 0 for no prescaling.
+ * @param[in]  prescaler           Value of the RTC2 PRESCALER register. Set to 0 for no prescaling.
  * @param[in]  op_queues_size      Size of queues holding timer operations that are pending
  *                                 execution. Note that due to the queue implementation, this size must
  *                                 be one more than the size that is actually needed.
@@ -217,7 +213,7 @@ uint32_t app_timer_create(app_timer_id_t const *      p_timer_id,
 /**@brief Function for starting a timer.
  *
  * @param[in]       timer_id      Timer identifier.
- * @param[in]       timeout_ticks Number of ticks (of RTC1, including prescaling) to time-out event
+ * @param[in]       timeout_ticks Number of ticks (of RTC2, including prescaling) to time-out event
  *                                (minimum 5 ticks).
  * @param[in]       p_context     General purpose pointer. Will be passed to the time-out handler when
  *                                the timer expires.
@@ -256,15 +252,15 @@ uint32_t app_timer_stop(app_timer_id_t timer_id);
  */
 uint32_t app_timer_stop_all(void);
 
-/**@brief Function for returning the current value of the RTC1 counter.
+/**@brief Function for returning the current value of the RTC2 counter.
  *
- * @param[out] p_ticks   Current value of the RTC1 counter.
+ * @param[out] p_ticks   Current value of the RTC2 counter.
  *
  * @retval     NRF_SUCCESS   If the counter was successfully read.
  */
 uint32_t app_timer_cnt_get(uint32_t * p_ticks);
 
-/**@brief Function for computing the difference between two RTC1 counter values.
+/**@brief Function for computing the difference between two RTC2 counter values.
  *
  * @param[in]  ticks_to       Value returned by app_timer_cnt_get().
  * @param[in]  ticks_from     Value returned by app_timer_cnt_get().
@@ -284,10 +280,6 @@ uint32_t app_timer_cnt_diff_compute(uint32_t   ticks_to,
  * @return Maximum number of events in queue observed so far.
  */
 uint16_t app_timer_op_queue_utilization_get(void);
-#endif
-
-#ifdef __cplusplus
-}
 #endif
 
 #endif // APP_TIMER_H__
