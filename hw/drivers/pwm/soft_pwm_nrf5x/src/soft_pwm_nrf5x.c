@@ -32,6 +32,7 @@
 #include <nrf_drv_clock.h>
 /* #include <bsp/cmsis_nvic.h> */
 #include <app_timer.h>
+#include <low_power_pwm.h>
 
 //#include <app_error.h>
 #include <app_util_platform.h>
@@ -41,17 +42,30 @@
 /* extern void PWM0_IRQHandler(void); */
 
 /* Mynewt Nordic driver */
-#include "pwm_nrf52/pwm_nrf52.h"
+#include "soft_pwm_nrf5x/soft_pwm_nrf5x.h"
 
 //static nrf_drv_pwm_t m_pwm0 = NRF_DRV_PWM_INSTANCE(0);
-
-struct nrf53_pwm_dev_global {
-    bool in_use;
+struct nrf5x_soft_pwm_dev_global {
+    low_power_pwm_t instance;
+    low_power_pwm_config_t config;
+    app_timer_timeout_handler_t handler;
     bool playing;
-    nrf_drv_pwm_t drv_instance;
-    nrf_drv_pwm_config_t config;
-    nrf_pwm_values_individual_t *duty_cycles;
 };
+
+#define APP_TIMER_PRESCALER     0
+
+#ifndef SPWM_MAX_INSTANCES
+#define SPWM_MAX_INSTANCES 1
+#endif
+
+static struct nrf5x_soft_pwm_dev_global channels[SPWM_MAX_INSTANCES];
+
+static void init_soft_pwm_dev_global()
+{
+    APP_TIMER_DEF(spwm_timer0);
+    channels[0].config.p_timer_id = &spwm_timer0;
+    channels[0].playing = false;
+}
 
 /**
  * Open the NRF52 PWM device
@@ -73,9 +87,8 @@ nrf5x_soft_pwm_open(struct os_dev *odev, uint32_t wait, void *arg)
 {
     struct pwm_dev *dev;
     int stat = 0;
-    int inst_id;
+    /* int chan; */
     dev = (struct pwm_dev *) odev;
-    inst_id = dev->pwm_instance_id;
 
     if (os_started()) {
         stat = os_mutex_pend(&dev->pwm_lock, wait);
@@ -90,10 +103,12 @@ nrf5x_soft_pwm_open(struct os_dev *odev, uint32_t wait, void *arg)
         return (stat);
     }
 
-    stat = init_instance(inst_id, arg);
-    if (stat) {
+    stat = nrf_drv_clock_init();
+    if (stat != NRF_SUCCESS) {
         return (stat);
     }
+    APP_TIMER_INIT(APP_TIMER_PRESCALER, SPWM_MAX_INSTANCES, NULL);
+    init_soft_pwm_dev_global();
 
     return (0);
 }
@@ -109,12 +124,10 @@ static int
 nrf5x_soft_pwm_close(struct os_dev *odev)
 {
     struct pwm_dev *dev;
-    int inst_id;
 
     dev = (struct pwm_dev *) odev;
-    inst_id = dev->pwm_instance_id;
 
-    /* nrf_drv_pwm_uninit(&instances[inst_id].drv_instance); */
+    /* free(instances); */
 
     if (os_started()) {
         os_mutex_release(&dev->pwm_lock);
@@ -137,6 +150,17 @@ nrf5x_soft_pwm_configure_channel(struct pwm_dev *dev,
                                  uint8_t cnum,
                                  void *data)
 {
+    int stat;
+    channels[cnum].config.active_high = false;
+    channels[cnum].config.period = 200;
+    channels[cnum].config.bit_mask = 1 << LED_1;
+
+    stat = low_power_pwm_init(&channels[cnum].instance,
+                              &channels[cnum].config,
+                              NULL/* handler */);
+    if (stat != NRF_SUCCESS) {
+        return (stat);
+    }
 
     return (0);
 }
@@ -159,6 +183,20 @@ nrf5x_soft_pwm_enable_duty_cycle(struct pwm_dev *dev,
                                  uint8_t cnum,
                                  uint16_t fraction)
 {
+    int stat;
+    stat = low_power_pwm_duty_set(&channels[cnum].instance, fraction);
+    if (stat != NRF_SUCCESS) {
+        return stat;
+    }
+
+    if (!channels[cnum].playing) {
+        channels[cnum].playing = true;
+        stat = low_power_pwm_start(&channels[cnum].instance,
+                                   channels[cnum].instance.bit_mask);
+        if (stat != NRF_SUCCESS) {
+            return stat;
+        }
+    }
 
     return (0);
 }
@@ -174,7 +212,11 @@ nrf5x_soft_pwm_enable_duty_cycle(struct pwm_dev *dev,
 static int
 nrf5x_soft_pwm_disable(struct pwm_dev *dev, uint8_t cnum)
 {
-    return (0);
+    if (channels[cnum].playing) {
+        low_power_pwm_stop(&channels[cnum].instance);
+        return (0);
+    }
+    return (-EINVAL);
 }
 
 /**
@@ -190,7 +232,7 @@ nrf5x_soft_pwm_disable(struct pwm_dev *dev, uint8_t cnum)
 static int
 nrf5x_soft_pwm_set_frequency(struct pwm_dev *dev, uint32_t freq_hz)
 {
-    return (EINVAL);
+    return (-EINVAL);
 }
 
 /**
@@ -225,23 +267,19 @@ nrf5x_soft_pwm_get_resolution_bits(struct pwm_dev *dev)
  * that subsequent lookups to this device allow us to manipulate it.
  */
 int
-nrf52_pwm_dev_init(struct os_dev *odev, void *arg)
+nrf5x_soft_pwm_dev_init(struct os_dev *odev, void *arg)
 {
     struct pwm_dev *dev;
     struct pwm_driver_funcs *pwm_funcs;
 
     dev = (struct pwm_dev *) odev;
 
-    if (arg) {
-        dev->pwm_chan_count = *((int*) arg);
-    } else {
-        dev->pwm_chan_count = 1;
-    }
     //should we have a way to prevent to have more than one instance?
-
     os_mutex_init(&dev->pwm_lock);
 
-    OS_DEV_SETHANDLERS(odev, nrf52_pwm_open, nrf52_pwm_close);
+    dev->pwm_chan_count = SPWM_MAX_INSTANCES;
+
+    OS_DEV_SETHANDLERS(odev, nrf5x_soft_pwm_open, nrf5x_soft_pwm_close);
 
     pwm_funcs = &dev->pwm_funcs;
     pwm_funcs->pwm_configure_channel = nrf5x_soft_pwm_configure_channel;
@@ -251,6 +289,5 @@ nrf52_pwm_dev_init(struct os_dev *odev, void *arg)
     pwm_funcs->pwm_get_resolution_bits = nrf5x_soft_pwm_get_resolution_bits;
     pwm_funcs->pwm_disable = nrf5x_soft_pwm_disable;
 
-    /* NVIC_SetVector(PWM0_IRQn, (uint32_t) PWM0_IRQHandler); */
     return (0);
 }
