@@ -52,7 +52,7 @@ struct nrf5x_soft_pwm_dev_global {
     bool playing;
 };
 
-#define APP_TIMER_PRESCALER     0
+#define APP_TIMER_PRESCALER     2
 
 #ifndef SPWM_MAX_INSTANCES
 #define SPWM_MAX_INSTANCES 1
@@ -60,12 +60,12 @@ struct nrf5x_soft_pwm_dev_global {
 
 static struct nrf5x_soft_pwm_dev_global channels[SPWM_MAX_INSTANCES];
 
-static void init_soft_pwm_dev_global()
-{
-    APP_TIMER_DEF(spwm_timer0);
-    channels[0].config.p_timer_id = &spwm_timer0;
-    channels[0].playing = false;
-}
+/* static void init_soft_pwm_dev_global() */
+/* { */
+/*     APP_TIMER_DEF(spwm_timer0); */
+/*     channels[0].config.p_timer_id = &spwm_timer0; */
+/*     channels[0].playing = false; */
+/* } */
 
 /**
  * Open the NRF52 PWM device
@@ -103,12 +103,16 @@ nrf5x_soft_pwm_open(struct os_dev *odev, uint32_t wait, void *arg)
         return (stat);
     }
 
-    stat = nrf_drv_clock_init();
-    if (stat != NRF_SUCCESS) {
-        return (stat);
-    }
-    APP_TIMER_INIT(APP_TIMER_PRESCALER, SPWM_MAX_INSTANCES, NULL);
-    init_soft_pwm_dev_global();
+    /* stat = nrf_drv_clock_init(); */
+    /* if (stat != NRF_SUCCESS) { */
+    /*     return (stat); */
+    /* } */
+
+    //nrf_drv_clock_lfclk_request(NULL);
+    APP_TIMER_INIT(APP_TIMER_PRESCALER, 1, NULL);
+    APP_TIMER_DEF(spwm_timer0);
+    channels[0].config.p_timer_id = &spwm_timer0;
+    channels[0].playing = false;
 
     return (0);
 }
@@ -126,8 +130,6 @@ nrf5x_soft_pwm_close(struct os_dev *odev)
     struct pwm_dev *dev;
 
     dev = (struct pwm_dev *) odev;
-
-    /* free(instances); */
 
     if (os_started()) {
         os_mutex_release(&dev->pwm_lock);
@@ -194,7 +196,7 @@ nrf5x_soft_pwm_enable_duty_cycle(struct pwm_dev *dev,
         stat = low_power_pwm_start(&channels[cnum].instance,
                                    channels[cnum].instance.bit_mask);
         if (stat != NRF_SUCCESS) {
-            return stat;
+            return -stat;
         }
     }
 
