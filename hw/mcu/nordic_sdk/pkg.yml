@@ -32,6 +32,7 @@ pkg.ign_files.BSP_NRF52:
     - "sdk_mapped_flags.c"
     - "app_timer_freertos.c"
     - "app_timer_rtx.c"
+    - "app_timer_ble_gzll.c"
     
 pkg.ign_files.BSP_NRF51:
     - "nrf_saadc.c"

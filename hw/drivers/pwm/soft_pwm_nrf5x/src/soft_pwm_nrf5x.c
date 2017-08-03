@@ -29,12 +29,10 @@
 #include <nrf.h>
 #include <nrf_pwm.h>
 #include <nrf_drv_pwm.h>
-#include <nrf_drv_clock.h>
+#include <nrf_drv_rtc.h>
 /* #include <bsp/cmsis_nvic.h> */
 #include <app_timer.h>
 #include <low_power_pwm.h>
-
-//#include <app_error.h>
 #include <app_util_platform.h>
 #include <nrf_drv_ppi.h>
 #include <nrf_drv_timer.h>
@@ -44,7 +42,13 @@
 /* Mynewt Nordic driver */
 #include "soft_pwm_nrf5x/soft_pwm_nrf5x.h"
 
-//static nrf_drv_pwm_t m_pwm0 = NRF_DRV_PWM_INSTANCE(0);
+#define APP_TIMER_PRESCALER     0
+
+#ifndef SPWM_MAX_INSTANCES
+#define SPWM_MAX_INSTANCES 1
+#endif
+
+APP_TIMER_DEF(spwm_timer0);
 struct nrf5x_soft_pwm_dev_global {
     low_power_pwm_t instance;
     low_power_pwm_config_t config;
@@ -52,20 +56,9 @@ struct nrf5x_soft_pwm_dev_global {
     bool playing;
 };
 
-#define APP_TIMER_PRESCALER     2
-
-#ifndef SPWM_MAX_INSTANCES
-#define SPWM_MAX_INSTANCES 1
-#endif
-
 static struct nrf5x_soft_pwm_dev_global channels[SPWM_MAX_INSTANCES];
 
-/* static void init_soft_pwm_dev_global() */
-/* { */
-/*     APP_TIMER_DEF(spwm_timer0); */
-/*     channels[0].config.p_timer_id = &spwm_timer0; */
-/*     channels[0].playing = false; */
-/* } */
+/* static uint32_t APP_TIMER_BUF[CEIL_DIV(APP_TIMER_BUF_SIZE((SPWM_MAX_INSTANCES) + 1), sizeof(uint32_t))]; */
 
 /**
  * Open the NRF52 PWM device
@@ -102,15 +95,13 @@ nrf5x_soft_pwm_open(struct os_dev *odev, uint32_t wait, void *arg)
         stat = OS_EBUSY;
         return (stat);
     }
+    /* app_timer_init((APP_TIMER_PRESCALER), */
+    /*                (SPWM_MAX_INSTANCES) + 1, */
+    /*                APP_TIMER_BUF, */
+    /*                NULL); */
 
-    /* stat = nrf_drv_clock_init(); */
-    /* if (stat != NRF_SUCCESS) { */
-    /*     return (stat); */
-    /* } */
+    APP_TIMER_INIT(APP_TIMER_PRESCALER, SPWM_MAX_INSTANCES, arg);
 
-    //nrf_drv_clock_lfclk_request(NULL);
-    APP_TIMER_INIT(APP_TIMER_PRESCALER, 1, NULL);
-    APP_TIMER_DEF(spwm_timer0);
     channels[0].config.p_timer_id = &spwm_timer0;
     channels[0].playing = false;
 
@@ -154,8 +145,8 @@ nrf5x_soft_pwm_configure_channel(struct pwm_dev *dev,
 {
     int stat;
     channels[cnum].config.active_high = false;
-    channels[cnum].config.period = 200;
-    channels[cnum].config.bit_mask = 1 << LED_1;
+    channels[cnum].config.period = 255;
+    channels[cnum].config.bit_mask = 1 << *((uint32_t*) data);
 
     stat = low_power_pwm_init(&channels[cnum].instance,
                               &channels[cnum].config,
@@ -191,14 +182,14 @@ nrf5x_soft_pwm_enable_duty_cycle(struct pwm_dev *dev,
         return stat;
     }
 
-    if (!channels[cnum].playing) {
-        channels[cnum].playing = true;
-        stat = low_power_pwm_start(&channels[cnum].instance,
-                                   channels[cnum].instance.bit_mask);
-        if (stat != NRF_SUCCESS) {
-            return -stat;
-        }
-    }
+    /* if (!channels[cnum].playing) { */
+    /*     channels[cnum].playing = true; */
+    /*     stat = low_power_pwm_start(&channels[cnum].instance, */
+    /*                                channels[cnum].instance.bit_mask); */
+    /*     if (stat != NRF_SUCCESS) { */
+    /*         return -stat; */
+    /*     } */
+    /* } */
 
     return (0);
 }
