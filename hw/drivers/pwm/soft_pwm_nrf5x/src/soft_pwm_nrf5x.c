@@ -182,14 +182,14 @@ nrf5x_soft_pwm_enable_duty_cycle(struct pwm_dev *dev,
         return stat;
     }
 
-    /* if (!channels[cnum].playing) { */
-    /*     channels[cnum].playing = true; */
-    /*     stat = low_power_pwm_start(&channels[cnum].instance, */
-    /*                                channels[cnum].instance.bit_mask); */
-    /*     if (stat != NRF_SUCCESS) { */
-    /*         return -stat; */
-    /*     } */
-    /* } */
+    if (!channels[cnum].playing) {
+        channels[cnum].playing = true;
+        stat = low_power_pwm_start(&channels[cnum].instance,
+                                   channels[cnum].instance.bit_mask);
+        if (stat != NRF_SUCCESS) {
+            return -stat;
+        }
+    }
 
     return (0);
 }
