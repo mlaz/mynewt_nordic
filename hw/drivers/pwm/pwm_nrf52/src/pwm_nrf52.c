@@ -38,12 +38,16 @@
 /* Mynewt Nordic driver */
 #include "pwm_nrf52/pwm_nrf52.h"
 
+typedef void (*user_handler_t) ();
+
 struct nrf53_pwm_dev_global {
     bool in_use;
     bool playing;
     nrf_drv_pwm_t drv_instance;
     nrf_drv_pwm_config_t config;
     nrf_pwm_values_individual_t *duty_cycles;
+    nrf_drv_pwm_handler_t internal_handler;
+    user_handler_t user_handler;
 };
 
 static struct nrf53_pwm_dev_global instances[] =
@@ -53,7 +57,9 @@ static struct nrf53_pwm_dev_global instances[] =
     [0].playing = false,
     [0].drv_instance = NRF_DRV_PWM_INSTANCE(0),
     [0].config = NRF_DRV_PWM_DEFAULT_CONFIG(0),
-    [0].duty_cycles = NULL
+    [0].duty_cycles = NULL,
+    [0].internal_handler = NULL,
+    [0].user_handler = NULL
 #endif
 #if (PWM1_ENABLED == 1)
     ,
@@ -61,7 +67,9 @@ static struct nrf53_pwm_dev_global instances[] =
     [1].playing = false,
     [1].drv_instance = NRF_DRV_PWM_INSTANCE(1),
     [1].config = NRF_DRV_PWM_DEFAULT_CONFIG(1),
-    [1].duty_cycles = NULL
+    [1].duty_cycles = NULL,
+    [1].internal_handler = NULL,
+    [1].user_handler = NULL
 #endif
 #if (PWM2_ENABLED == 1)
     ,
@@ -69,18 +77,22 @@ static struct nrf53_pwm_dev_global instances[] =
     [2].playing = false,
     [2].drv_instance = NRF_DRV_PWM_INSTANCE(2),
     [2].config = NRF_DRV_PWM_DEFAULT_CONFIG(2),
-    [2].duty_cycles = NULL
+    [2].duty_cycles = NULL,
+    [2].internal_handler = NULL,
+    [2].user_handler = NULL
 #endif
 };
 
-/* /\** */
-/*  * Validate the contents of a given nrf_drv_pwm_config_t structure. */
-/*  *\/ */
-/* static int */
-/* validate_config(nrf_drv_pwm_config_t* config) */
-/* { */
-/*     return 0; */
-/* } */
+#if (PWM0_ENABLED == 1)
+static void handler(nrf_drv_pwm_evt_type_t event_type)
+{
+    if (event_type == NRF_DRV_PWM_EVT_END_SEQ0 &&
+        instances[0].user_handler)
+    {
+        instances[0].user_handler();
+    }
+}
+#endif
 
 /**
  * Initialize a driver instance.
@@ -94,7 +106,7 @@ init_instance(int inst_id, nrf_drv_pwm_config_t* init_conf)
     nrf_drv_pwm_config_t *config;
     instances[inst_id].duty_cycles = NULL;
 
-    //what should the defaults be?
+    /* what should the defaults be? */
     config = &instances[inst_id].config;
     if (!init_conf) {
         config->output_pins[0] = NRF_DRV_PWM_PIN_NOT_USED;
@@ -217,7 +229,7 @@ play_current_config(struct nrf53_pwm_dev_global *instance)
     nrf_drv_pwm_simple_playback(&instances->drv_instance,
                                 &seq,
                                 1,
-                                NRF_DRV_PWM_FLAG_LOOP);
+                                NRF_DRV_PWM_FLAG_LOOP | NRF_DRV_PWM_FLAG_SIGNAL_END_SEQ0  );
 }
 
 /**
@@ -241,11 +253,15 @@ nrf52_pwm_configure_channel(struct pwm_dev *dev,
     config->output_pins[cnum] |= (cfg->inverted) ?
         NRF_DRV_PWM_PIN_INVERTED : config->output_pins[cnum];
 
+    instances[inst_id].user_handler = (user_handler_t) cfg->data;
+    instances[inst_id].internal_handler =
+        (cfg->data) ? handler : NULL;
+
     if (instances[inst_id].playing) {
         nrf_drv_pwm_uninit(&instances[inst_id].drv_instance);
         nrf_drv_pwm_init(&instances[inst_id].drv_instance,
                          &instances[inst_id].config,
-                         NULL);
+                         instances[inst_id].internal_handler);
 
         play_current_config(&instances[inst_id]);
     }
@@ -287,7 +303,7 @@ nrf52_pwm_enable_duty_cycle(struct pwm_dev *dev, uint8_t cnum, uint16_t fraction
     if (!instances[inst_id].playing) {
         stat = nrf_drv_pwm_init(&instances[inst_id].drv_instance,
                                 &instances[inst_id].config,
-                                NULL);
+                                instances[inst_id].internal_handler);
         if (stat != NRF_SUCCESS) {
             return (stat);
         }
@@ -314,8 +330,9 @@ nrf52_pwm_disable(struct pwm_dev *dev, uint8_t cnum)
     nrf_drv_pwm_uninit(&instances[inst_id].drv_instance);
     nrf_drv_pwm_init(&instances[inst_id].drv_instance,
                      &instances[inst_id].config,
-                     NULL);
-    //check if there is any channel in use
+                     instances[inst_id].internal_handler);
+
+    /* check if there is any channel in use */
     if (instances[inst_id].playing) {
         play_current_config(&instances[inst_id]);
     }
@@ -375,7 +392,7 @@ nrf52_pwm_set_frequency(struct pwm_dev *dev, uint32_t freq_hz)
         nrf_drv_pwm_uninit(&instances[inst_id].drv_instance);
         nrf_drv_pwm_init(&instances[inst_id].drv_instance,
                          &instances[inst_id].config,
-                         NULL);
+                         instances[inst_id].internal_handler);
 
         play_current_config(&instances[inst_id]);
     }
