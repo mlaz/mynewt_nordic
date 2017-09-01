@@ -23,9 +23,9 @@
 #include <errno.h>
 #include <pwm/pwm.h>
 #include <string.h>
+#include <bsp/cmsis_nvic.h>
 
 /* Nordic headers */
-#include <bsp.h>
 #include <nrf.h>
 #include <nrf_pwm.h>
 #include <nrf_drv_pwm.h>
@@ -38,26 +38,39 @@
 /* Mynewt Nordic driver */
 #include "pwm_nrf52/pwm_nrf52.h"
 
+/**
+ * Weak symbols, these are defined in Nordic drivers but not exported.
+ * Needed for NVIC_SetVector().
+ */
+#if (PWM0_ENABLED == 1)
+extern void PWM0_IRQHandler(void);
+#endif
+#if (PWM1_ENABLED == 1)
+extern void PWM1_IRQHandler(void);
+#endif
+#if (PWM2_ENABLED == 1)
+extern void PWM2_IRQHandler(void);
+#endif
+
 typedef void (*user_handler_t) ();
 
-struct nrf53_pwm_dev_global {
+struct nrf52_pwm_dev_global {
     bool in_use;
     bool playing;
     nrf_drv_pwm_t drv_instance;
     nrf_drv_pwm_config_t config;
-    nrf_pwm_values_individual_t *duty_cycles;
+    nrf_pwm_sequence_t seq;
     nrf_drv_pwm_handler_t internal_handler;
     user_handler_t user_handler;
 };
 
-static struct nrf53_pwm_dev_global instances[] =
+static struct nrf52_pwm_dev_global instances[] =
 {
 #if (PWM0_ENABLED == 1)
     [0].in_use = false,
     [0].playing = false,
     [0].drv_instance = NRF_DRV_PWM_INSTANCE(0),
     [0].config = NRF_DRV_PWM_DEFAULT_CONFIG(0),
-    [0].duty_cycles = NULL,
     [0].internal_handler = NULL,
     [0].user_handler = NULL
 #endif
@@ -67,7 +80,6 @@ static struct nrf53_pwm_dev_global instances[] =
     [1].playing = false,
     [1].drv_instance = NRF_DRV_PWM_INSTANCE(1),
     [1].config = NRF_DRV_PWM_DEFAULT_CONFIG(1),
-    [1].duty_cycles = NULL,
     [1].internal_handler = NULL,
     [1].user_handler = NULL
 #endif
@@ -77,17 +89,49 @@ static struct nrf53_pwm_dev_global instances[] =
     [2].playing = false,
     [2].drv_instance = NRF_DRV_PWM_INSTANCE(2),
     [2].config = NRF_DRV_PWM_DEFAULT_CONFIG(2),
-    [2].duty_cycles = NULL,
     [2].internal_handler = NULL,
     [2].user_handler = NULL
 #endif
 };
 
 #if (PWM0_ENABLED == 1)
+nrf_pwm_values_individual_t values_pwm0;
+#endif
+#if (PWM1_ENABLED == 1)
+nrf_pwm_values_individual_t values_pwm1;
+#endif
+#if (PWM2_ENABLED == 1)
+nrf_pwm_values_individual_t values_pwm2;
+#endif
+
+static nrf_pwm_sequence_t const sequences[] =
+{
+#if (PWM0_ENABLED == 1)
+    [0].values.p_individual = &values_pwm0,
+    [0].length = 4,
+    [0].repeats = 0,
+    [0].end_delay = 0
+#endif
+#if (PWM1_ENABLED == 1)
+    ,
+    [1].values.p_individual = &values_pwm1,
+    [1].length = 4,
+    [1].repeats = 0,
+    [1].end_delay = 0
+#endif
+#if (PWM2_ENABLED == 1)
+    ,
+    [2].values.p_individual = &values_pwm2,
+    [2].length = 4,
+    [2].repeats = 0,
+    [2].end_delay = 0
+#endif
+};
+
+#if (PWM0_ENABLED == 1)
 static void handler(nrf_drv_pwm_evt_type_t event_type)
 {
-    if (event_type == NRF_DRV_PWM_EVT_END_SEQ0 &&
-        instances[0].user_handler)
+    if (event_type == NRF_DRV_PWM_EVT_FINISHED)
     {
         instances[0].user_handler();
     }
@@ -104,7 +148,6 @@ init_instance(int inst_id, nrf_drv_pwm_config_t* init_conf)
         return (EINVAL);
     }
     nrf_drv_pwm_config_t *config;
-    instances[inst_id].duty_cycles = NULL;
 
     /* what should the defaults be? */
     config = &instances[inst_id].config;
@@ -133,8 +176,9 @@ static void
 cleanup_instance(int inst_id)
 {
     if (instances[inst_id].playing) {
-        free(instances[inst_id].duty_cycles);
-        instances[inst_id].duty_cycles = NULL;
+        memset((uint16_t *) sequences[inst_id].values.p_individual,
+               0x00,
+               4 * sizeof(uint16_t));
         instances[inst_id].playing = false;
     }
     instances[inst_id].in_use = false;
@@ -216,20 +260,13 @@ nrf52_pwm_close(struct os_dev *odev)
  * Play using current configuration.
  */
 static void
-play_current_config(struct nrf53_pwm_dev_global *instance)
+play_current_config(int inst_id)
 {
-    nrf_pwm_sequence_t const seq =
-        {
-            .values.p_individual = instance->duty_cycles,
-            .length              = 4,
-            .repeats             = 0,
-            .end_delay           = 0
-        };
-
-    nrf_drv_pwm_simple_playback(&instances->drv_instance,
-                                &seq,
+    instances[inst_id].playing = true;
+    nrf_drv_pwm_simple_playback(&instances[inst_id].drv_instance,
+                                &sequences[inst_id],
                                 1,
-                                NRF_DRV_PWM_FLAG_LOOP | NRF_DRV_PWM_FLAG_SIGNAL_END_SEQ0  );
+                                NRF_DRV_PWM_FLAG_LOOP);
 }
 
 /**
@@ -263,7 +300,7 @@ nrf52_pwm_configure_channel(struct pwm_dev *dev,
                          &instances[inst_id].config,
                          instances[inst_id].internal_handler);
 
-        play_current_config(&instances[inst_id]);
+        play_current_config(inst_id);
     }
 
     return (0);
@@ -292,13 +329,8 @@ nrf52_pwm_enable_duty_cycle(struct pwm_dev *dev, uint8_t cnum, uint16_t fraction
     config = &instances[inst_id].config;
     assert (config->output_pins[cnum] != NRF_DRV_PWM_PIN_NOT_USED);
 
-    if (instances[inst_id].duty_cycles == NULL) {
-        instances[inst_id].duty_cycles = (nrf_pwm_values_individual_t *)
-            calloc(1, sizeof(nrf_pwm_sequence_t));
-        assert(instances[inst_id].duty_cycles);
-    }
-
-    ((uint16_t *) instances[inst_id].duty_cycles)[cnum] = fraction;
+    ((uint16_t *) sequences[inst_id].values.p_individual)[cnum]
+        = fraction;
 
     if (!instances[inst_id].playing) {
         stat = nrf_drv_pwm_init(&instances[inst_id].drv_instance,
@@ -307,8 +339,7 @@ nrf52_pwm_enable_duty_cycle(struct pwm_dev *dev, uint8_t cnum, uint16_t fraction
         if (stat != NRF_SUCCESS) {
             return (stat);
         }
-        play_current_config(&instances[inst_id]);
-        instances[inst_id].playing = true;
+        play_current_config(inst_id);
     }
     return (0);
 }
@@ -334,7 +365,7 @@ nrf52_pwm_disable(struct pwm_dev *dev, uint8_t cnum)
 
     /* check if there is any channel in use */
     if (instances[inst_id].playing) {
-        play_current_config(&instances[inst_id]);
+        play_current_config(inst_id);
     }
     return (0);
 }
@@ -394,7 +425,7 @@ nrf52_pwm_set_frequency(struct pwm_dev *dev, uint32_t freq_hz)
                          &instances[inst_id].config,
                          instances[inst_id].internal_handler);
 
-        play_current_config(&instances[inst_id]);
+        play_current_config(inst_id);
     }
 
     return base_freq_val;
@@ -522,6 +553,8 @@ nrf52_pwm_dev_init(struct os_dev *odev, void *arg)
     pwm_funcs->pwm_get_clock_freq = nrf52_pwm_get_clock_freq;
     pwm_funcs->pwm_get_resolution_bits = nrf52_pwm_get_resolution_bits;
     pwm_funcs->pwm_disable = nrf52_pwm_disable;
+
+    NVIC_SetVector(PWM0_IRQn, (uint32_t) PWM0_IRQHandler);
 
     return (0);
 }
