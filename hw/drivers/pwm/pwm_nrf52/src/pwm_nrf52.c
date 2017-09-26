@@ -149,7 +149,6 @@ init_instance(int inst_id, nrf_drv_pwm_config_t* init_conf)
     }
     nrf_drv_pwm_config_t *config;
 
-    /* what should the defaults be? */
     config = &instances[inst_id].config;
     if (!init_conf) {
         config->output_pins[0] = NRF_DRV_PWM_PIN_NOT_USED;
@@ -325,12 +324,14 @@ nrf52_pwm_enable_duty_cycle(struct pwm_dev *dev, uint8_t cnum, uint16_t fraction
     int stat;
     int inst_id = dev->pwm_instance_id;
     nrf_drv_pwm_config_t *config;
+    bool inverted;
 
     config = &instances[inst_id].config;
     assert (config->output_pins[cnum] != NRF_DRV_PWM_PIN_NOT_USED);
+    inverted = ((config->output_pins[cnum] & NRF_DRV_PWM_PIN_INVERTED) != 0);
 
-    ((uint16_t *) sequences[inst_id].values.p_individual)[cnum]
-        = fraction;
+    ((uint16_t *) sequences[inst_id].values.p_individual)[cnum] =
+            (inverted) ? fraction : config->top_value - fraction;
 
     if (!instances[inst_id].playing) {
         stat = nrf_drv_pwm_init(&instances[inst_id].drv_instance,
@@ -362,6 +363,7 @@ nrf52_pwm_disable(struct pwm_dev *dev, uint8_t cnum)
     nrf_drv_pwm_init(&instances[inst_id].drv_instance,
                      &instances[inst_id].config,
                      instances[inst_id].internal_handler);
+
 
     /* check if there is any channel in use */
     if (instances[inst_id].playing) {
@@ -528,18 +530,14 @@ nrf52_pwm_dev_init(struct os_dev *odev, void *arg)
 
     dev = (struct pwm_dev *) odev;
 
-    if (arg) {
-        dev->pwm_instance_id = *((int*) arg);
-    } else {
-        dev->pwm_instance_id = 0;
-        while (dev->pwm_instance_id < PWM_COUNT) {
-            if (!instances[dev->pwm_instance_id].in_use) {
-                break;
-            }
-            dev->pwm_instance_id++;
+    dev->pwm_instance_id = 0;
+    while (dev->pwm_instance_id < PWM_COUNT) {
+        if (!instances[dev->pwm_instance_id].in_use) {
+            instances[dev->pwm_instance_id].in_use = true;
+            break;
         }
+        dev->pwm_instance_id++;
     }
-    instances[dev->pwm_instance_id].in_use = true;
 
     dev->pwm_chan_count = NRF_PWM_CHANNEL_COUNT;
     os_mutex_init(&dev->pwm_lock);
@@ -554,7 +552,24 @@ nrf52_pwm_dev_init(struct os_dev *odev, void *arg)
     pwm_funcs->pwm_get_resolution_bits = nrf52_pwm_get_resolution_bits;
     pwm_funcs->pwm_disable = nrf52_pwm_disable;
 
-    NVIC_SetVector(PWM0_IRQn, (uint32_t) PWM0_IRQHandler);
+    switch (dev->pwm_instance_id) {
+#if (PWM0_ENABLED == 1)
+    case 0:
+        NVIC_SetVector(PWM0_IRQn, (uint32_t) PWM0_IRQHandler);
+        break;
+#endif
 
+#if (PWM1_ENABLED == 1)
+    case 1:
+        NVIC_SetVector(PWM1_IRQn, (uint32_t) PWM1_IRQHandler);
+        break;
+#endif
+
+#if (PWM2_ENABLED == 1)
+    case 2:
+        NVIC_SetVector(PWM2_IRQn, (uint32_t) PWM2_IRQHandler);
+        break;
+#endif
+    }
     return (0);
 }
